@@ -69,10 +69,10 @@ def listar_alunos():
         ]
 
 
-@router.get("/{id}")
-def buscar_aluno(id: int):
+@router.get("/{aluno_id}")
+def buscar_aluno(aluno_id: int):
     with SessionLocal() as banco:
-        aluno = banco.get(Aluno, id)
+        aluno = banco.get(Aluno, aluno_id)
 
         if aluno is None:
             raise HTTPException(status_code=404, detail="Aluno não encontrado.")
