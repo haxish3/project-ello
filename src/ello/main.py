@@ -10,6 +10,6 @@ Base.metadata.create_all(engine)
 app.include_router(alunos_router)
 
 
-@app.get("/health")
+@app.get("/alive")
 def health():
-    return {"status": "ok"}
+    return {"status": "yes"}
