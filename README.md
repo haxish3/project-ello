@@ -63,6 +63,9 @@ Comando de inicialização da API:
 uv run ello-prod
 ```
 
+Na Vercel, `api/index.py` expõe o objeto FastAPI diretamente para o runtime
+serverless; não configure comando de inicialização nem diretório de saída.
+
 Depois do primeiro deploy, abra o terminal do serviço e execute uma vez:
 
 ```bash
