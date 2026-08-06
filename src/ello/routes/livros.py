@@ -172,57 +172,70 @@ def importar_csv(data: ImportacaoCsv):
     estoque_adicionado = 0
     linhas_lidas = 0
     erros = []
+    catalogo = {}
+
+    for numero_linha, linha in enumerate(leitor, start=1):
+        if not linha or not any(celula.strip() for celula in linha):
+            continue
+        if "cdu" in normalizar_texto(linha[0]):
+            continue
+
+        linhas_lidas += 1
+        if len(linha) != 8:
+            erros.append(
+                {
+                    "linha": numero_linha,
+                    "erro": f"Esperadas 8 colunas, recebidas {len(linha)}.",
+                }
+            )
+            continue
+
+        try:
+            entrada = LivroEntrada(
+                cdu=linha[0],
+                titulo=linha[1],
+                autor=linha[2] or None,
+                editora=linha[3] or None,
+                data_publicacao=linha[4] or None,
+                edicao=linha[5] or None,
+                colecao_serie=linha[6] or None,
+                numero_paginas=paginas_para_int(linha[7]),
+            )
+        except ValidationError as erro:
+            erros.append({"linha": numero_linha, "erro": str(erro)})
+            continue
+
+        chave = gerar_chave(entrada)
+        if chave in catalogo:
+            catalogo[chave]["quantidade"] += 1
+        else:
+            catalogo[chave] = {"entrada": entrada, "quantidade": 1}
 
     with SessionLocal() as banco:
         try:
-            for numero_linha, linha in enumerate(leitor, start=1):
-                if not linha or not any(celula.strip() for celula in linha):
-                    continue
-                if "cdu" in normalizar_texto(linha[0]):
-                    continue
+            existentes = {
+                livro.chave_catalografica: livro
+                for livro in banco.scalars(
+                    select(Livro).where(Livro.chave_catalografica.in_(list(catalogo)))
+                ).all()
+            }
 
-                linhas_lidas += 1
-                if len(linha) != 8:
-                    erros.append(
-                        {
-                            "linha": numero_linha,
-                            "erro": f"Esperadas 8 colunas, recebidas {len(linha)}.",
-                        }
-                    )
-                    continue
-
-                try:
-                    entrada = LivroEntrada(
-                        cdu=linha[0],
-                        titulo=linha[1],
-                        autor=linha[2] or None,
-                        editora=linha[3] or None,
-                        data_publicacao=linha[4] or None,
-                        edicao=linha[5] or None,
-                        colecao_serie=linha[6] or None,
-                        numero_paginas=paginas_para_int(linha[7]),
-                    )
-                except ValidationError as erro:
-                    erros.append({"linha": numero_linha, "erro": str(erro)})
-                    continue
-
-                chave = gerar_chave(entrada)
-                existente = banco.scalar(
-                    select(Livro).where(Livro.chave_catalografica == chave)
-                )
+            for chave, item in catalogo.items():
+                quantidade = item["quantidade"]
+                existente = existentes.get(chave)
                 if existente is not None:
-                    existente.estoque += 1
-                    estoque_adicionado += 1
+                    existente.estoque += quantidade
+                    estoque_adicionado += quantidade
                 else:
                     banco.add(
                         Livro(
-                            **dados_do_livro(entrada),
-                            estoque=1,
+                            **dados_do_livro(item["entrada"]),
+                            estoque=quantidade,
                             chave_catalografica=chave,
                         )
                     )
-                    banco.flush()
                     novos += 1
+                    estoque_adicionado += quantidade - 1
 
             banco.commit()
             return {
