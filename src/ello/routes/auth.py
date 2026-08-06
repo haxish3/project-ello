@@ -98,7 +98,7 @@ def usuario_atual(
 def exigir_cargo(cargo_necessario: str):
     def verificar(usuario: Annotated[Usuario, Depends(usuario_atual)]):
         cargos = {cargo.nome for cargo in usuario.cargos}
-        if "admin" not in cargos and cargo_necessario not in cargos:
+        if not cargos.intersection({"admin", "dev"}) and cargo_necessario not in cargos:
             raise HTTPException(
                 status_code=403,
                 detail="Você não tem permissão para acessar este recurso.",

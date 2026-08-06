@@ -1,7 +1,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -111,9 +111,13 @@ def atualizar_cargos(usuario_id: int, data: CargosAtualizacao, admin: AdminAtual
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
         cargos = buscar_cargos(banco, data.cargos)
-        if usuario_id == admin.id and "admin" not in {cargo.nome for cargo in cargos}:
+        cargos_administrativos = {cargo.nome for cargo in cargos}.intersection(
+            {"admin", "dev"}
+        )
+        if usuario_id == admin.id and not cargos_administrativos:
             raise HTTPException(
-                status_code=400, detail="O admin não pode remover o próprio cargo."
+                status_code=400,
+                detail="Você não pode remover o próprio acesso administrativo.",
             )
 
         usuario.cargos = cargos
@@ -147,3 +151,27 @@ def alterar_ativo(usuario_id: int, data: AtivoAtualizacao, admin: AdminAtual):
         banco.commit()
         banco.refresh(usuario)
         return usuario_para_dict(usuario)
+
+
+@router.delete("/{usuario_id}", status_code=204)
+def excluir_usuario(usuario_id: int, admin: AdminAtual):
+    if usuario_id == admin.id:
+        raise HTTPException(
+            status_code=400, detail="Você não pode excluir a própria conta."
+        )
+
+    with SessionLocal() as banco:
+        usuario = banco.get(Usuario, usuario_id)
+        if usuario is None:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+        try:
+            banco.delete(usuario)
+            banco.commit()
+            return Response(status_code=204)
+        except SQLAlchemyError as erro:
+            banco.rollback()
+            logger.exception("Erro ao excluir usuário %s", usuario_id)
+            raise HTTPException(
+                status_code=500, detail="Erro ao excluir usuário do banco de dados."
+            ) from erro

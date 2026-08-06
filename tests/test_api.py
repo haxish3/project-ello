@@ -29,7 +29,8 @@ def cliente(monkeypatch):
     with sessao() as banco:
         admin = Cargo(nome="admin")
         biblioteca = Cargo(nome="biblioteca")
-        banco.add_all([admin, biblioteca])
+        dev = Cargo(nome="dev")
+        banco.add_all([admin, biblioteca, dev])
         banco.flush()
         banco.add_all(
             [
@@ -49,6 +50,12 @@ def cliente(monkeypatch):
                     nome="Sem cargo",
                     login="comum",
                     senha_hash=auth.gerar_hash("senha-comum"),
+                ),
+                Usuario(
+                    nome="Desenvolvedor",
+                    login="dev",
+                    senha_hash=auth.gerar_hash("senha-dev"),
+                    cargos=[dev],
                 ),
             ]
         )
@@ -126,3 +133,16 @@ def test_admin_cria_usuario_e_atribui_cargo(cliente):
 def test_usuario_biblioteca_nao_administra_contas(cliente):
     headers = autenticar(cliente, "biblioteca", "senha-biblioteca")
     assert cliente.get("/usuarios", headers=headers).status_code == 403
+
+
+def test_dev_administra_usuarios_e_nao_exclui_a_si_mesmo(cliente):
+    headers = autenticar(cliente, "dev", "senha-dev")
+    resposta = cliente.get("/usuarios", headers=headers)
+    assert resposta.status_code == 200
+    dev = next(usuario for usuario in resposta.json() if usuario["login"] == "dev")
+    comum = next(usuario for usuario in resposta.json() if usuario["login"] == "comum")
+
+    assert cliente.delete(f"/usuarios/{dev['id']}", headers=headers).status_code == 400
+    assert (
+        cliente.delete(f"/usuarios/{comum['id']}", headers=headers).status_code == 204
+    )
