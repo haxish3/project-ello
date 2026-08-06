@@ -2,7 +2,6 @@ import argparse
 import json
 from pathlib import Path
 
-from ello.database import Base, atualizar_estrutura_do_banco, engine
 from ello.routes.livros import ImportacaoCsv, importar_csv
 
 
@@ -14,8 +13,6 @@ def main():
     argumentos = parser.parse_args()
 
     conteudo = argumentos.arquivo.read_text(encoding="utf-8-sig")
-    Base.metadata.create_all(engine)
-    atualizar_estrutura_do_banco()
     resultado = importar_csv(ImportacaoCsv(conteudo=conteudo))
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 

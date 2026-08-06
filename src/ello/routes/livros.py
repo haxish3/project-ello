@@ -1,16 +1,23 @@
 import csv
 import io
+import logging
 import re
 
-from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from ello.database import SessionLocal
 from ello.models import Livro, gerar_chave_catalografica, normalizar_texto
+from ello.routes.auth import exigir_cargo
 
-router = APIRouter(prefix="/livros", tags=["Livros"])
+router = APIRouter(
+    prefix="/livros",
+    tags=["Livros"],
+    dependencies=[Depends(exigir_cargo("biblioteca"))],
+)
+logger = logging.getLogger(__name__)
 
 
 class LivroEntrada(BaseModel):
@@ -25,6 +32,38 @@ class LivroEntrada(BaseModel):
     colecao_serie: str | None = None
     numero_paginas: int | None = Field(default=None, gt=0)
     confirmar_duplicado: bool = False
+
+    @field_validator("autor", "editora", "data_publicacao", "edicao", "colecao_serie")
+    @classmethod
+    def vazio_vira_nulo(cls, valor: str | None):
+        return valor or None
+
+
+class LivroAtualizacao(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    cdu: str | None = Field(default=None, min_length=1)
+    titulo: str | None = Field(default=None, min_length=1)
+    autor: str | None = None
+    editora: str | None = None
+    data_publicacao: str | None = None
+    edicao: str | None = None
+    colecao_serie: str | None = None
+    numero_paginas: int | None = Field(default=None, gt=0)
+    estoque: int | None = Field(default=None, ge=0)
+
+
+class LivroResposta(BaseModel):
+    id: int
+    cdu: str
+    titulo: str
+    autor: str | None
+    editora: str | None
+    data_publicacao: str | None
+    edicao: str | None
+    colecao_serie: str | None
+    numero_paginas: int | None
+    estoque: int
 
 
 class ImportacaoCsv(BaseModel):
@@ -61,7 +100,7 @@ def dados_do_livro(data: LivroEntrada):
     return data.model_dump(exclude={"confirmar_duplicado"})
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=LivroResposta)
 def cadastrar_livro(data: LivroEntrada, response: Response):
     with SessionLocal() as banco:
         try:
@@ -106,11 +145,12 @@ def cadastrar_livro(data: LivroEntrada, response: Response):
                     "mensagem": "Este livro já está cadastrado.",
                 },
             )
-        except SQLAlchemyError:
+        except SQLAlchemyError as erro:
             banco.rollback()
+            logger.exception("Erro ao cadastrar livro")
             raise HTTPException(
                 status_code=500, detail="Erro ao salvar no banco de dados"
-            )
+            ) from erro
 
 
 def limpar_conteudo_csv(conteudo: str) -> str:
@@ -192,21 +232,22 @@ def importar_csv(data: ImportacaoCsv):
                 "linhas_com_erro": len(erros),
                 "erros": erros,
             }
-        except SQLAlchemyError:
+        except SQLAlchemyError as erro:
             banco.rollback()
+            logger.exception("Erro ao importar CSV de livros")
             raise HTTPException(
                 status_code=500, detail="Erro ao importar o CSV para o banco de dados"
-            )
+            ) from erro
 
 
-@router.get("")
+@router.get("", response_model=list[LivroResposta])
 def listar_livros():
     with SessionLocal() as banco:
         livros = banco.scalars(select(Livro).order_by(Livro.titulo)).all()
         return [livro_para_dict(livro) for livro in livros]
 
 
-@router.get("/{livro_id}")
+@router.get("/{livro_id}", response_model=LivroResposta)
 def buscar_livro(livro_id: int):
     with SessionLocal() as banco:
         livro = banco.get(Livro, livro_id)
@@ -215,3 +256,88 @@ def buscar_livro(livro_id: int):
             raise HTTPException(status_code=404, detail="Livro não encontrado.")
 
         return livro_para_dict(livro)
+
+
+@router.put("/{livro_id}", response_model=LivroResposta)
+def atualizar_livro(livro_id: int, data: LivroAtualizacao):
+    with SessionLocal() as banco:
+        livro = banco.get(Livro, livro_id)
+        if livro is None:
+            raise HTTPException(status_code=404, detail="Livro não encontrado.")
+
+        alteracoes = data.model_dump(exclude_unset=True)
+        if not alteracoes:
+            return livro_para_dict(livro)
+
+        valores = livro_para_dict(livro) | alteracoes
+        if valores["cdu"] is None or valores["titulo"] is None:
+            raise HTTPException(
+                status_code=422, detail="CDU e título não podem ser nulos."
+            )
+
+        chave = gerar_chave_catalografica(
+            valores["titulo"],
+            valores["autor"],
+            valores["editora"],
+            valores["data_publicacao"],
+            valores["edicao"],
+        )
+        duplicado = banco.scalar(
+            select(Livro).where(
+                Livro.chave_catalografica == chave,
+                Livro.id != livro_id,
+            )
+        )
+        if duplicado is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="A alteração deixaria dois cadastros para o mesmo livro.",
+            )
+
+        try:
+            for campo, valor in alteracoes.items():
+                setattr(livro, campo, valor)
+            livro.chave_catalografica = chave
+            banco.commit()
+            banco.refresh(livro)
+            return livro_para_dict(livro)
+        except IntegrityError as erro:
+            banco.rollback()
+            raise HTTPException(
+                status_code=409, detail="Já existe um cadastro para esse livro."
+            ) from erro
+        except SQLAlchemyError as erro:
+            banco.rollback()
+            logger.exception("Erro ao atualizar livro %s", livro_id)
+            raise HTTPException(
+                status_code=500, detail="Erro ao salvar no banco de dados."
+            ) from erro
+
+
+@router.delete("/{livro_id}")
+def excluir_livro(livro_id: int, remover_todos: bool = False):
+    """Remove uma unidade; remover_todos=true apaga o cadastro inteiro."""
+    with SessionLocal() as banco:
+        livro = banco.get(Livro, livro_id)
+        if livro is None:
+            raise HTTPException(status_code=404, detail="Livro não encontrado.")
+
+        try:
+            if livro.estoque > 1 and not remover_todos:
+                livro.estoque -= 1
+                banco.commit()
+                banco.refresh(livro)
+                return {
+                    "cadastro_excluido": False,
+                    "estoque": livro.estoque,
+                }
+
+            banco.delete(livro)
+            banco.commit()
+            return {"cadastro_excluido": True, "estoque": 0}
+        except SQLAlchemyError as erro:
+            banco.rollback()
+            logger.exception("Erro ao excluir livro %s", livro_id)
+            raise HTTPException(
+                status_code=500, detail="Erro ao excluir livro do banco de dados."
+            ) from erro

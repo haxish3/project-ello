@@ -54,3 +54,26 @@ def test_importacao_csv_agrupa_livros_repetidos():
     assert resultado["unidades_adicionadas_ao_estoque"] == 1
     assert resultado["linhas_com_erro"] == 0
     assert livros.listar_livros()[0]["estoque"] == 2
+
+
+def test_atualiza_e_remove_uma_unidade_por_vez():
+    entrada = livros.LivroEntrada(cdu="800", titulo="Livro de teste")
+    criado = livros.cadastrar_livro(entrada, Response())
+    livros.cadastrar_livro(
+        entrada.model_copy(update={"confirmar_duplicado": True}), Response()
+    )
+
+    atualizado = livros.atualizar_livro(
+        criado["id"], livros.LivroAtualizacao(titulo="Novo título")
+    )
+    assert atualizado["titulo"] == "Novo título"
+
+    resultado = livros.excluir_livro(criado["id"])
+    assert resultado == {"cadastro_excluido": False, "estoque": 1}
+
+    resultado = livros.excluir_livro(criado["id"])
+    assert resultado == {"cadastro_excluido": True, "estoque": 0}
+
+    with pytest.raises(HTTPException) as erro:
+        livros.buscar_livro(criado["id"])
+    assert erro.value.status_code == 404

@@ -1,18 +1,25 @@
 [project]
 name = "ello"
 version = "0.1.0"
-description = "Add your description here"
+description = "API do sistema Ello de gestão escolar e biblioteca"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.19.0",
     "fastapi>=0.141.1",
+    "psycopg[binary]>=3.3.4",
+    "pwdlib[argon2]>=0.3.0",
+    "pyjwt>=2.13.0",
+    "python-dotenv>=1.2.2",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.52.1",
 ]
 
 [project.scripts]
-ello = "ello:main"
+ello = "ello.main:run"
+ello-prod = "ello.main:run_production"
 importar-livros = "ello.importar_livros:main"
+criar-admin = "ello.criar_admin:main"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
@@ -20,6 +27,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.9.1",
     "pytest>=9.1.1",
     "ruff>=0.16.1",
 ]
