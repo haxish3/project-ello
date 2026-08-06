@@ -20,6 +20,7 @@ ello = "ello.main:run"
 ello-prod = "ello.main:run_production"
 importar-livros = "ello.importar_livros:main"
 criar-admin = "ello.criar_admin:main"
+promover-dev = "ello.promover_dev:main"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]

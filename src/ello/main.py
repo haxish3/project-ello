@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ello.config import FRONTEND_ORIGINS, PORT
 from ello.routes.alunos import router as alunos_router
 from ello.routes.auth import router as auth_router
+from ello.routes.dev import router as dev_router
 from ello.routes.livros import router as livros_router
 from ello.routes.usuarios import router as usuarios_router
 
@@ -22,6 +23,7 @@ app.include_router(alunos_router)
 app.include_router(livros_router)
 app.include_router(auth_router)
 app.include_router(usuarios_router)
+app.include_router(dev_router)
 
 
 @app.get("/alive")

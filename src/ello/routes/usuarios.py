@@ -69,15 +69,33 @@ def buscar_cargos(banco, nomes: list[str]) -> list[Cargo]:
     return list(cargos)
 
 
+def usuario_e_dev(usuario: Usuario) -> bool:
+    return "dev" in {cargo.nome for cargo in usuario.cargos}
+
+
+def impedir_admin_de_gerenciar_dev(admin: Usuario, usuario: Usuario):
+    if usuario_e_dev(usuario) and not usuario_e_dev(admin):
+        raise HTTPException(
+            status_code=403,
+            detail="Somente outro dev pode alterar uma conta dev.",
+        )
+
+
 @router.post("", status_code=201, response_model=UsuarioResposta)
-def criar_usuario(data: UsuarioCriacao, _admin: AdminAtual):
+def criar_usuario(data: UsuarioCriacao, admin: AdminAtual):
     with SessionLocal() as banco:
         try:
+            cargos = buscar_cargos(banco, data.cargos)
+            if "dev" in {cargo.nome for cargo in cargos} and not usuario_e_dev(admin):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Somente um dev pode conceder o cargo dev.",
+                )
             usuario = Usuario(
                 nome=data.nome,
                 login=data.login.casefold(),
                 senha_hash=gerar_hash(data.senha),
-                cargos=buscar_cargos(banco, data.cargos),
+                cargos=cargos,
             )
             banco.add(usuario)
             banco.commit()
@@ -110,7 +128,13 @@ def atualizar_cargos(usuario_id: int, data: CargosAtualizacao, admin: AdminAtual
         if usuario is None:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
 
+        impedir_admin_de_gerenciar_dev(admin, usuario)
         cargos = buscar_cargos(banco, data.cargos)
+        if "dev" in {cargo.nome for cargo in cargos} and not usuario_e_dev(admin):
+            raise HTTPException(
+                status_code=403,
+                detail="Somente um dev pode conceder o cargo dev.",
+            )
         cargos_administrativos = {cargo.nome for cargo in cargos}.intersection(
             {"admin", "dev"}
         )
@@ -127,11 +151,12 @@ def atualizar_cargos(usuario_id: int, data: CargosAtualizacao, admin: AdminAtual
 
 
 @router.put("/{usuario_id}/senha", status_code=204)
-def redefinir_senha(usuario_id: int, data: SenhaAtualizacao, _admin: AdminAtual):
+def redefinir_senha(usuario_id: int, data: SenhaAtualizacao, admin: AdminAtual):
     with SessionLocal() as banco:
         usuario = banco.get(Usuario, usuario_id)
         if usuario is None:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        impedir_admin_de_gerenciar_dev(admin, usuario)
         usuario.senha_hash = gerar_hash(data.senha)
         banco.commit()
 
@@ -147,6 +172,7 @@ def alterar_ativo(usuario_id: int, data: AtivoAtualizacao, admin: AdminAtual):
         usuario = banco.get(Usuario, usuario_id)
         if usuario is None:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        impedir_admin_de_gerenciar_dev(admin, usuario)
         usuario.ativo = data.ativo
         banco.commit()
         banco.refresh(usuario)
@@ -164,6 +190,7 @@ def excluir_usuario(usuario_id: int, admin: AdminAtual):
         usuario = banco.get(Usuario, usuario_id)
         if usuario is None:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        impedir_admin_de_gerenciar_dev(admin, usuario)
 
         try:
             banco.delete(usuario)

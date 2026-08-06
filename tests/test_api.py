@@ -9,6 +9,7 @@ from ello.database import Base
 from ello.main import app
 from ello.models import Cargo, Usuario
 from ello.routes import alunos, auth, livros, usuarios
+from ello.routes import dev as rotas_dev
 
 
 @pytest.fixture
@@ -20,7 +21,7 @@ def cliente(monkeypatch):
     )
     Base.metadata.create_all(engine)
     sessao = sessionmaker(bind=engine)
-    for modulo in (alunos, auth, livros, usuarios):
+    for modulo in (alunos, auth, livros, rotas_dev, usuarios):
         monkeypatch.setattr(modulo, "SessionLocal", sessao)
     monkeypatch.setattr(
         config, "JWT_SECRET", "segredo-de-testes-com-mais-de-trinta-e-dois-caracteres"
@@ -146,3 +147,44 @@ def test_dev_administra_usuarios_e_nao_exclui_a_si_mesmo(cliente):
     assert (
         cliente.delete(f"/usuarios/{comum['id']}", headers=headers).status_code == 204
     )
+
+
+def test_so_dev_concede_dev_e_limpa_o_banco_preservando_devs(cliente):
+    admin = autenticar(cliente, "admin", "senha-admin")
+    resposta = cliente.post(
+        "/usuarios",
+        headers=admin,
+        json={
+            "nome": "Dev falso",
+            "login": "dev-falso",
+            "senha": "senha-segura",
+            "cargos": ["dev"],
+        },
+    )
+    assert resposta.status_code == 403
+    assert (
+        cliente.post(
+            "/dev/limpar",
+            headers=admin,
+            json={"escopo": "tudo", "confirmacao": "ZERAR TUDO"},
+        ).status_code
+        == 403
+    )
+
+    dev = autenticar(cliente, "dev", "senha-dev")
+    assert (
+        cliente.post(
+            "/dev/limpar",
+            headers=dev,
+            json={"escopo": "tudo", "confirmacao": "sim"},
+        ).status_code
+        == 400
+    )
+    resposta = cliente.post(
+        "/dev/limpar",
+        headers=dev,
+        json={"escopo": "tudo", "confirmacao": "ZERAR TUDO"},
+    )
+    assert resposta.status_code == 200
+    usuarios_restantes = cliente.get("/usuarios", headers=dev).json()
+    assert [usuario["login"] for usuario in usuarios_restantes] == ["dev"]

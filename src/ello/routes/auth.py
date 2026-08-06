@@ -108,6 +108,15 @@ def exigir_cargo(cargo_necessario: str):
     return verificar
 
 
+def exigir_dev(usuario: Annotated[Usuario, Depends(usuario_atual)]):
+    if "dev" not in {cargo.nome for cargo in usuario.cargos}:
+        raise HTTPException(
+            status_code=403,
+            detail="Esta ação é exclusiva para desenvolvedores.",
+        )
+    return usuario
+
+
 @router.post("/login", response_model=TokenResposta)
 def login(data: LoginEntrada):
     with SessionLocal() as banco:
