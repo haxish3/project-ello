@@ -1,4 +1,5 @@
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 
@@ -7,10 +8,18 @@ load_dotenv()
 
 def normalizar_url_postgres(url: str) -> str:
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+psycopg://", 1)
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+psycopg://", 1)
-    return url
+        url = url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    elif not url.startswith("postgresql+psycopg://"):
+        return url
+    partes = urlsplit(url)
+    parametros = [
+        (chave, valor)
+        for chave, valor in parse_qsl(partes.query, keep_blank_values=True)
+        if chave.casefold() != "pgbouncer"
+    ]
+    return urlunsplit(partes._replace(query=urlencode(parametros)))
 
 
 DATABASE_URL = normalizar_url_postgres(
